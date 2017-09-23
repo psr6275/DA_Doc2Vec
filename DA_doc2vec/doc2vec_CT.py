@@ -544,7 +544,7 @@ class Doctag(namedtuple('Doctag', 'offset, word_count, doc_count')):
 
 class Doc2Vec(Word2Vec):
     """Class for training, using and evaluating neural networks described in http://arxiv.org/pdf/1405.4053v2.pdf"""
-    def __init__(self, documents=None, dm_mean=None,
+    def __init__(self, documents=None,st_label = None, dm_mean=None,
                  dm=1, dbow_words=0, dm_concat=0, dm_tag_count=1,
                  docvecs=None, docvecs_mapfile=None, comment=None, trim_rule=None, **kwargs):
         """
@@ -628,7 +628,7 @@ class Doc2Vec(Word2Vec):
 
         if dm_mean is not None:
             self.cbow_mean = dm_mean
-
+        self.st_label = st_label
         self.dbow_words = dbow_words
         self.dm_concat = dm_concat
         self.dm_tag_count = dm_tag_count
@@ -666,6 +666,19 @@ class Doc2Vec(Word2Vec):
         self.docvecs.borrow_from(other_model.docvecs)
         super(Doc2Vec, self).reset_from(other_model)
 
+    def build_vocab(self,sentences,keep_raw_vocab=False,trim_rule=None, progress_per=10000, update=False):
+        """
+        add the scan or scale vocab for making cummulative table of separate source and target corpus
+        """
+        self.scan_vocab(sentences,progress_per = progress_per, trim_rule=trim_rule) 
+        self.scale_vocab(keep_raw_vocab = keep_raw_vocab, trim_rule=trim_rule,update=update)
+        if self.st_label is not None:
+            self.scale_vocab_da
+        finalize_vocab(update=update)
+    def scale_vocab_da(self, ...):
+        """
+        count to separate datasets!!
+        """
     def scan_vocab(self, documents, progress_per=10000, trim_rule=None, update=False):
         logger.info("collecting all words and their counts")
         document_no = -1

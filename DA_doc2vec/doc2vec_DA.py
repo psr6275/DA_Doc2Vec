@@ -44,7 +44,7 @@ to trim unneeded model memory = use (much) less RAM.
 import logging
 import os
 import warnings
-
+from copy import deepcopy
 try:
     from queue import Queue
 except ImportError:
