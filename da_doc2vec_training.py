@@ -67,9 +67,9 @@ del documents
 
 d_size = 200
 
-model_da_dbow = Doc2Vec(sentences,st_label = total_st_label,dbow_words = 1,comment=1,size = d_size, window = 3, min_count = 5, workers = 30, dm=0,iter=20)
+model_da_dbow = Doc2Vec(sentences,st_label = total_st_label,dbow_words = 1,comment=1,size = d_size, window = 3, min_count = 5, workers = 30, dm=0,iter=20,hs=1)
 file_name = data_path+'doc2vec_source_'+src+'_target_'+tgt
-model_da_dbow.save(file_name+'.da_dbow')
+model_da_dbow.save(file_name+'.da_dbow_hs')
 doctag = model_da_dbow.docvecs.doctag_syn1
 doctag2 = model_da_dbow.docvecs.doctag_syn0
 
@@ -83,7 +83,7 @@ word_t = model_da_dbow.wv.syn0_t
 doc2vec = {'wordtag':wordtag,'st_label':total_st_label,'docvec0':doctag2,'src_word':word_s,'tgt_word':word_t,'true_label':total_true_label,'docvec':doctag}
 embed()
 
-f = open(file_name+'_da_dbow_data.pickle','wb')
+f = open(file_name+'_da_dbow_hs_data.pickle','wb')
 pickle.dump(doc2vec,f)
 f.close()
-
+embed()

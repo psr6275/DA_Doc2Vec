@@ -53,15 +53,16 @@ except ImportError:
 from collections import namedtuple, defaultdict
 from timeit import default_timer
 
-from numpy import zeros, sum as np_sum, add as np_add, concatenate, \
+from numpy import zeros,outer, sum as np_sum, add as np_add, concatenate, \
     repeat as np_repeat, array, float32 as REAL, empty, ones, memmap as np_memmap, \
-    sqrt, newaxis, ndarray, dot, vstack, dtype, divide as np_divide, integer
+    sqrt,uint32, newaxis,exp,log, ndarray, dot, vstack, dtype, divide as np_divide, integer
+from scipy.special import expit
 
 
 from gensim.utils import call_on_class_only
 from gensim import utils, matutils  # utility fnc for pickling, common scipy operations etc
 from gensim.models.word2vec import Word2Vec, train_cbow_pair, train_sg_pair, train_batch_sg
-from gensim.models.keyedvectors import KeyedVectors
+from gensim.models.keyedvectors import KeyedVectors,Vocab
 from six.moves import xrange, zip
 from six import string_types, integer_types
 
@@ -241,6 +242,112 @@ except ImportError:
                 np_add.at(word_vectors, word_context_indexes, neu1e_r[doctag_len:])
 
         return len(padded_document_indexes) - pre_pad_count - post_pad_count
+def train_document_dbow_CT(model, doc_words, doctag_indexes, alpha, work=None,
+                            train_words=False, learn_doctags=True, learn_words=True, learn_hidden=True,
+                            word_vectors=None, word_locks=None, doctag_vectors=None, doctag_locks=None):
+    """
+     Update distributed bag of words model ("PV-DBOW") by training on a single document.
+
+        Called internally from `Doc2Vec.train()` and `Doc2Vec.infer_vector()`.
+
+        The document is provided as `doc_words`, a list of word tokens which are looked up
+        in the model's vocab dictionary, and `doctag_indexes`, which provide indexes
+        into the doctag_vectors array.
+
+        If `train_words` is True, simultaneously train word-to-word (not just doc-to-word)
+        examples, exactly as per Word2Vec skip-gram training. (Without this option,
+        word vectors are neither consulted nor updated during DBOW doc vector training.)
+
+        Any of `learn_doctags', `learn_words`, and `learn_hidden` may be set False to
+        prevent learning-updates to those respective model weights, as if using the
+        (partially-)frozen model to infer other compatible vectors.
+
+        This is the non-optimized, Python version. If you have cython installed, gensim
+        will use the optimized version from doc2vec_inner instead.
+
+    """
+    if doctag_vectors is None:
+        doctag_vectors = model.docvecs.doctag_syn0
+    if doctag_locks is None:
+        doctag_locks = model.docvecs.doctag_syn0_lockf
+
+    if train_words and learn_words:
+        if model.dbow_ct_words:
+            train_batch_sg_ct(model, [doc_words],model.st_label[doctag_indexes[0]], alpha, work,False)
+        else:
+            train_batch_sg(model, [doc_words], alpha, work,False)
+    for doctag_index in doctag_indexes:
+        for word in doc_words:
+            train_sg_pair_CT(model, word, doctag_index, alpha,st_lab = model.st_label[doctag_index], learn_vectors=learn_doctags,
+                          learn_hidden=learn_hidden, context_vectors=doctag_vectors,
+                          context_locks=doctag_locks)
+
+    return len(doc_words)
+def train_batch_sg_ct(model, sentences, st_lb, alpha, work=None, compute_loss = False):
+    result = 0
+    if st_lb ==1:
+        vocabs = model.wv.vocab_s
+    else:
+        vocabs = model.wv.vocab_t
+
+    for sentence in sentences:
+        # subsampling for whole corpus
+        word_vocabs = [vocabs[w] for w in sentence if w in model.wv.vocab and 
+                        model.wv.vocab[w].sample_int > model.random.rand() * 2**32]
+        # negative sampling for specific corpus
+        for pos, word in enumerate(word_vocabs):
+            reduced_window = model.random.randint(model.window)
+
+            start = max(0,pos-model.window+reduced_window)
+            for pos2, word2 in enumerate(word_vocabs[start:(pos+model.window +1 - reduced_window)],start):
+                # do not train on the word itself
+                if pos2 != pos:
+                    train_sg_pair_CT(model,model.wv.index2word[word.index],word2.index,alpha,compute_loss = compute_loss )
+        result += len(word_vocabs)
+    return result
+
+def train_sg_pair_CT(model, word, context_index, alpha,st_lab = None, learn_vectors = True, learn_hidden=True,
+        context_vectors = None, context_locks=None, compute_loss =False):
+    if context_vectors is None:
+        context_vectors = model.wv.syn0
+    if context_locks is None:
+        context_locks = model.syn0_lockf
+    if word not in model.wv.vocab:
+        return
+    st_label = st_lab
+    if st_label ==1:
+        predict_word = model.wv.vocab_s[word]
+        cum_table = model.cum_table_s
+    else:
+        predict_word = model.wv.vocab_t[word]
+        cum_table = model.cum_table_t
+    
+    l1 = context_vectors[context_index]
+    lock_factor = context_locks[context_index]
+
+    neu1e = zeros(l1.shape)
+
+    word_indices = [predict_word.index]
+    while len(word_indices) < model.negative +1:
+       w = cum_table.searchsorted(model.random.randint(cum_table[-1]))
+       if w != predict_word.index:
+           word_indices.append(w)
+    l2b = model.syn1neg[word_indices]
+    prod_term = dot(l1,l2b.T)
+    fb = expit(prod_term)
+    gb = (model.neg_labels - fb)*alpha
+    if learn_hidden:
+        model.syn1neg[word_indices] += outer(gb,l1)
+    neu1e += dot(gb,l2b)
+
+    if compute_loss:
+        model.running_training_loss -= sum(log(expit(-1*prod_term[1:])))
+        model.running_training_loss -= log(expit(prodterm[0]))
+    if learn_vectors:
+        l1 += neu1e * lock_factor
+
+    return neu1e
+
 
 
 class TaggedDocument(namedtuple('TaggedDocument', 'words tags')):
@@ -255,7 +362,12 @@ class TaggedDocument(namedtuple('TaggedDocument', 'words tags')):
     """
     def __str__(self):
         return '%s(%s, %s)' % (self.__class__.__name__, self.words, self.tags)
-
+class TaggedLabeledDocument(namedtuple('TaggedDocument','words tags labels')):
+    """
+    add label information of sentences!! to TaggedDocument
+    """
+    def __str__(self):
+        return '%s(%s, %s, %s)' % (self.__class__.__name__, self.words, self.tags, self.labels)
 
 # for compatibility
 class LabeledSentence(TaggedDocument):
@@ -544,8 +656,8 @@ class Doctag(namedtuple('Doctag', 'offset, word_count, doc_count')):
 
 class Doc2Vec(Word2Vec):
     """Class for training, using and evaluating neural networks described in http://arxiv.org/pdf/1405.4053v2.pdf"""
-    def __init__(self, documents=None,st_label = None, dm_mean=None,
-                 dm=1, dbow_words=0, dm_concat=0, dm_tag_count=1,
+    def __init__(self, documents=None,st_label = None,dbow_ct = None, dm_mean=None,
+                 dm=1, dbow_ct_words = 0,dbow_words=0, dm_concat=0, dm_tag_count=1,
                  docvecs=None, docvecs_mapfile=None, comment=None, trim_rule=None, **kwargs):
         """
         Initialize the model from an iterable of `documents`. Each document is a
@@ -629,7 +741,13 @@ class Doc2Vec(Word2Vec):
         if dm_mean is not None:
             self.cbow_mean = dm_mean
         self.st_label = st_label
+        self.neg_labels = []
+        if self.negative >0:
+            self.neg_labels = zeros(self.negative+1)
+            self.neg_labels[0]=1.
         self.dbow_words = dbow_words
+        self.dbow_ct_words = dbow_ct_words
+        self.dbow_ct = dbow_ct
         self.dm_concat = dm_concat
         self.dm_tag_count = dm_tag_count
         if self.dm and self.dm_concat:
@@ -671,23 +789,123 @@ class Doc2Vec(Word2Vec):
         add the scan or scale vocab for making cummulative table of separate source and target corpus
         """
         self.scan_vocab(sentences,progress_per = progress_per, trim_rule=trim_rule) 
-        self.scale_vocab(keep_raw_vocab = keep_raw_vocab, trim_rule=trim_rule,update=update)
+        #self.scale_vocab(keep_raw_vocab = keep_raw_vocab, trim_rule=trim_rule,update=update)
         if self.st_label is not None:
-            self.scale_vocab_da
-        finalize_vocab(update=update)
-    def scale_vocab_da(self, ...):
+            report_value = self.scale_vocab(keep_raw_vocab = True, trim_rule=trim_rule,update=update)
+            self.scale_vocab_da(retain_total = report_value['retain_total'],keep_raw_vocab = keep_raw_vocab, trim_rule = trim_rule, update = update)
+        else:
+            self.scale_vocab(keep_raw_vocab = keep_raw_vocab, trim_rule = trim_rule, update = update)
+
+        self.finalize_vocab(update=update)
+    def finalize_vocab(self,update=False):
+        if not self.wv.index2word:
+            self.scale_vocab()
+        if self.sorted_vocab and not update:
+            self.sort_vocab()
+            for i,w in enumerate(self.wv.index2word):
+                self.wv.vocab_s[w].index = i
+                self.wv.vocab_t[w].index = i
+        if self.hs:
+            self.create_binary_tree()
+        if self.negative:
+            self.cum_table = self.make_cum_table()
+            self.cum_table_s = self.make_cum_table(vocab = self.wv.vocab_s)
+            self.cum_table_t = self.make_cum_table(vocab = self.wv.vocab_t)
+        if self.null_word:
+            word,v = '\0', Vocab(count=1,sample_int=0)
+            v.index = len(self.wv.vocab)
+            self.wv.index2word.append(word)
+            self.wv.vocab[word] = v
+            self.wv.vocab_s[word] = v
+            self.wv.vocab_t[word] = v
+        if not update:
+            self.reset_weights()
+        else:
+            self.update_weights()
+    def make_cum_table(self,vocab = None, power=0.75,domain=2**31 - 1):
+        vocab_size = len(self.wv.index2word)
+        cum_table = zeros(vocab_size, dtype=uint32)
+        word_list = self.wv.index2word
+        if not vocab:
+            vocab = self.wv.vocab
+        train_words_pow = 0.0
+        for word_index in xrange(vocab_size):
+            train_words_pow += vocab[word_list[word_index]].count**power
+        cumulative = 0.0
+        for word_index in xrange(vocab_size):
+            cumulative += vocab[word_list[word_index]].count**power
+            cum_table[word_index] = round(cumulative/train_words_pow * domain)
+        if len(cum_table) > 0:
+            assert cum_table[-1] == domain
+        return cum_table
+
+    def scale_vocab_da(self,retain_total = None, min_count = None, sample = None, dry_run = False, keep_raw_vocab = False,trim_rule=None,update=False):
         """
         count to separate datasets!!
         """
+        min_count = min_count or self.min_count
+        sample = sample or self.sample
+        drop_total = drop_unique=0
+        retain_words = self.wv.index2word
+        retain_total_s = 0
+        retain_total_t = 0
+        self.wv.vocab_s = {}
+        self.wv.vocab_t = {}
+        for i,w in enumerate(retain_words):
+            v_s = self.raw_vocab_s[w]
+            v_t = self.raw_vocab_t[w]
+            retain_total_s += v_s 
+            self.wv.vocab_s[w] = Vocab(count=v_s,index=i)
+            retain_total_t += v_t 
+            self.wv.vocab_t[w] = Vocab(count=v_t,index=i)
+        if not sample:
+            threshold_count_s = retain_total_s
+            threshold_count_t = retain_total_t
+        elif sample <1.0:
+            threshold_count_s = sample*retain_total_s
+            threshold_count_t = sample*retain_total_t
+        else:
+            threshold_count = int(sample*(3+sqrt(5))/2)
+        downsample_total_s, downsample_total_t, downsample_unique_s, downsample_unique_t = 0,0,0,0
+        for w in retain_words:
+            v_s = self.raw_vocab_s[w]
+            v_t = self.raw_vocab_t[w]
+            if v_s == 0:
+                word_prob_s = 1.0
+            else:
+                word_prob_s = (sqrt(v_s/ threshold_count_s)+1)*(threshold_count_s/v_s)
+            if v_t ==0:
+                word_prob_t = 1.0
+            else:
+                word_prob_t = (sqrt(v_t/ threshold_count_t)+1)*(threshold_count_t/v_t)
+            if word_prob_s <1.0:
+                downsample_unique_s += 1
+                downsample_total_s += word_prob_s*v_s
+            else:
+                word_prob_s = 1.0
+                downsample_total_s +=v_s
+            if word_prob_t <1.0:
+                downsample_unique_t += 1
+                downsample_total_t += word_prob_t * v_t
+            else:
+                word_prob_t = 1.0
+                downsample_total_t +=v_t
+            if not dry_run:
+                self.wv.vocab_s[w].sample_int = int(round(word_prob_s * 2**32))
+                self.wv.vocab_t[w].sample_int = int(round(word_prob_t * 2**32))
     def scan_vocab(self, documents, progress_per=10000, trim_rule=None, update=False):
         logger.info("collecting all words and their counts")
         document_no = -1
         total_words = 0
+        total_words_s = 0
+        total_words_t = 0
         min_reduce = 1
         interval_start = default_timer() - 0.00001  # guard against next sample being identical
         interval_count = 0
         checked_string_types = 0
         vocab = defaultdict(int)
+        vocab_s = defaultdict(int)
+        vocab_t = defaultdict(int)
         for document_no, document in enumerate(documents):
             if not checked_string_types:
                 if isinstance(document.words, string_types):
@@ -708,17 +926,39 @@ class Doc2Vec(Word2Vec):
                 self.docvecs.note_doctag(tag, document_no, document_length)
 
             for word in document.words:
-                vocab[word] += 1
+                if document.labels ==1:
+                    vocab[word]+=1
+                    vocab_s[word] += 1
+                    vocab_t[word]+=0
+                else:
+                    vocab[word]+=1
+                    vocab_s[word]+=0
+                    vocab_t[word] += 1
             total_words += len(document.words)
+            if document.labels==1:
+                total_words_s += len(document.words)
+            else:
+                total_words_t += len(document.words)
 
             if self.max_vocab_size and len(vocab) > self.max_vocab_size:
+                # if available vocab size is over
                 utils.prune_vocab(vocab, min_reduce, trim_rule=trim_rule)
+                #utils.prune_vocab(vocab_s,min_reduce, trim_rule=trim_rule)
+                #utils.prune_vocab(vocab_t, min_reduce, trim_rule=trim_rule)
                 min_reduce += 1
 
         logger.info("collected %i word types and %i unique tags from a corpus of %i examples and %i words",
                     len(vocab), len(self.docvecs), document_no + 1, total_words)
         self.corpus_count = document_no + 1
         self.raw_vocab = vocab
+        if min_reduce>1:
+            word_dic = vocab.keys()
+            for wrd in word_dic:
+                self.raw_vocab_s[wrd] = vocab_s[wrd]
+                self.raw_vocab_t[wrd] = vocab_t[wrd]
+        else:
+            self.raw_vocab_s = vocab_s
+            self.raw_vocab_t = vocab_t
 
     def _do_train_job(self, job, alpha, inits):
         work, neu1 = inits
@@ -726,7 +966,11 @@ class Doc2Vec(Word2Vec):
         for doc in job:
             indexed_doctags = self.docvecs.indexed_doctags(doc.tags)
             doctag_indexes, doctag_vectors, doctag_locks, ignored = indexed_doctags
-            if self.sg:
+            if self.dbow_ct:
+                tally += train_document_dbow_CT(self, doc.words,doctag_indexes,alpha, work,
+                                                train_words = self.dbow_words,
+                                                doctag_vectors = doctag_vectors, doctag_locks = doctag_locks)
+            elif self.sg:
                 tally += train_document_dbow(self, doc.words, doctag_indexes, alpha, work,
                                              train_words=self.dbow_words,
                                              doctag_vectors=doctag_vectors, doctag_locks=doctag_locks)

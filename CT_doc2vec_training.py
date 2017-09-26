@@ -1,5 +1,6 @@
-from gensim.models.doc2vec import *
-from gensim.models.word2vec import Word2Vec
+#from gensim.models.doc2vec import *
+#from gensim.models.word2vec import Word2Vec
+from DA_doc2vec.doc2vec_CT import *
 import pickle
 import re
 import numpy as np
@@ -45,8 +46,8 @@ f = open(data_path+'amazon_source_'+src+'_target_'+tgt+'_shuffled.pickle','rb')
 aa = pickle.load(f)
 f.close()
 total_text = aa['total_text']
-total_true_label = aa['true_label']
 total_st_label = aa['st_label']
+total_true_label = aa['true_label']
 
 documents = []
 for document in total_text:
@@ -64,13 +65,14 @@ for uid, doc in enumerate(documents):
     for sen in doc:
         sen = sen.lower()
         sen = re.sub("[^a-zA-Z]"," ",sen)
-        #if total_st_label[uid] ==1:
-        #    if total_true_label[uid] ==1:
-        #        sentence = TaggedDocument(words = sen.split(),tags = ['DOC_%s'%(uid),'Positive'])
-        #    else:
-        #        sentence = TaggedDocument(words = sen.split(),tags = ['DOC_%s'%(uid),'Negative'])
-        #else:
-        sentence = TaggedDocument(words = sen.split(), tags = ['DOC_%s'%(uid)])
+        if total_st_label[uid] ==1:
+            #if total_true_label[uid] ==1:
+            #    sentence = TaggedDocument(words = sen.split(),tags = ['DOC_%s'%(uid),'Positive'])
+            #else:
+            #    sentence = TaggedDocument(words = sen.split(),tags = ['DOC_%s'%(uid),'Negative'])
+            sentence = TaggedLabeledDocument(words = sen.split(), tags = ['DOC_%s'%(uid)], labels = 1)
+        else:
+            sentence = TaggedLabeledDocument(words = sen.split(), tags = ['DOC_%s'%(uid)], labels = 0)
         sentences.append(sentence)
 
 print("length of sentences = ",len(sentences))
@@ -79,25 +81,19 @@ print(sentences[0])
 del documents
 
 d_size = 200
-
-print("start to train the word vectors using word2vec")
-
-#model_word2vec = Word2Vec(sentences2,size = d_size, window=3, min_count=10, workers = 30, sg=1, iter=30)
-#model_word2vec.save(data_path+'word2vec_source_'+src+'_target_'+tgt+'.sg')
-print("start to train document vectors using fixed word vectors")
-
+print("start to training CT-doc2vec with word training")
 from copy import deepcopy
-model_dbow = Doc2Vec(sentences,size = d_size,dbow_words =1, window = 3, min_count = 10, workers = 30, dm=0,iter=30)
+model_ct = Doc2Vec(sentences,st_label = total_st_label,dbow_ct = 1,dbow_ct_words = 1,size = d_size,dbow_words =1, window = 3, min_count = 10, workers = 30, dm=0,iter=30)
 file_name = data_path+'doc2vec_source_'+src+'_target_'+tgt
-model_dbow.save(file_name+'.dbow')
+model_ct.save(file_name+'.ct_words')
 #posi = model_dbow.docvecs._int_index('Positive')
 #negi = model_dbow.docvecs._int_index('Negative')
-doctag = deepcopy(model_dbow.docvecs.doctag_syn0)
+doctag = deepcopy(model_ct.docvecs.doctag_syn0)
 #doctag = np.delete(doctag,[posi,negi],0)
 doc2vec = {'st_label':total_st_label,'true_label':total_true_label,'docvec':doctag}
 
 embed()
-f = open(file_name+'_dbow_data.pickle','wb')
+f = open(file_name+'_dbow_ct_words_data.pickle','wb')
 pickle.dump(doc2vec,f)
 f.close()
 

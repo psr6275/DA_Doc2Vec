@@ -59,9 +59,10 @@ from numpy import zeros,exp,outer, sum as np_sum, add as np_add, concatenate, \
 
 from scipy.special import expit
 from gensim.utils import call_on_class_only
+
 from gensim import utils, matutils  # utility fnc for pickling, common scipy operations etc
 from gensim.models.word2vec import Word2Vec, train_cbow_pair,  train_batch_sg
-from gensim.models.keyedvectors import KeyedVectors
+from gensim.models.keyedvectors import KeyedVectors,Vocab
 from six.moves import xrange, zip
 from six import string_types, integer_types
 
