@@ -10,7 +10,7 @@ from IPython import embed
 data_path = '../data/'
 stops = set(nc.stopwords.words("english"))
 
-src = "kitchen"
+src = "dvd"
 tgt = "electronics"
 """
 f = open(data_path + 'amazon_domain_adaptation_dictionary_data.pickle','rb')
