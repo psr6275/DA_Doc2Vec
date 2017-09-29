@@ -42,7 +42,10 @@ to trim unneeded model memory = use (much) less RAM.
 """
 
 import logging
-import os
+import os,sys
+sys.path.append(os.getcwd())
+sys.path.append(os.getcwd()+"/DA_doc2vec")
+#print(os.getcwd())
 import warnings
 
 try:
@@ -61,16 +64,17 @@ from scipy.special import expit
 
 from gensim.utils import call_on_class_only
 from gensim import utils, matutils  # utility fnc for pickling, common scipy operations etc
-from gensim.models.word2vec import Word2Vec, train_cbow_pair, train_sg_pair, train_batch_sg
-from gensim.models.keyedvectors import KeyedVectors,Vocab
+from word2vec import Word2Vec, train_cbow_pair, train_sg_pair, train_batch_sg
+from keyedvectors import KeyedVectors,Vocab
 from six.moves import xrange, zip
 from six import string_types, integer_types
 
 logger = logging.getLogger(__name__)
 
 try:
-    from gensim.models.doc2vec_inner import train_document_dbow, train_document_dm, train_document_dm_concat
-    from gensim.models.word2vec_inner import FAST_VERSION  # blas-adaptation shared from word2vec
+    from doc2vec_inner_ct import train_document_dbow, train_document_dm, train_document_dm_concat, train_document_dbow_CT
+
+    from word2vec_inner import FAST_VERSION  # blas-adaptation shared from word2vec
     logger.debug('Fast version of {0} is being used'.format(__name__))
 except ImportError:
     logger.warning('Slow version of {0} is being used'.format(__name__))
@@ -242,11 +246,11 @@ except ImportError:
                 np_add.at(word_vectors, word_context_indexes, neu1e_r[doctag_len:])
 
         return len(padded_document_indexes) - pre_pad_count - post_pad_count
-def train_document_dbow_CT(model, doc_words, doctag_indexes, alpha, work=None,
+    def train_document_dbow_CT(model, doc_words, doctag_indexes, alpha, work=None,
                             train_words=False, learn_doctags=True, learn_words=True, learn_hidden=True,
                             word_vectors=None, word_locks=None, doctag_vectors=None, doctag_locks=None):
-    """
-     Update distributed bag of words model ("PV-DBOW") by training on a single document.
+        """
+        Update distributed bag of words model ("PV-DBOW") by training on a single document.
 
         Called internally from `Doc2Vec.train()` and `Doc2Vec.infer_vector()`.
 
@@ -265,88 +269,88 @@ def train_document_dbow_CT(model, doc_words, doctag_indexes, alpha, work=None,
         This is the non-optimized, Python version. If you have cython installed, gensim
         will use the optimized version from doc2vec_inner instead.
 
-    """
-    if doctag_vectors is None:
-        doctag_vectors = model.docvecs.doctag_syn0
-    if doctag_locks is None:
-        doctag_locks = model.docvecs.doctag_syn0_lockf
+        """
+        if doctag_vectors is None:
+            doctag_vectors = model.docvecs.doctag_syn0
+        if doctag_locks is None:
+            doctag_locks = model.docvecs.doctag_syn0_lockf
 
-    if train_words and learn_words:
-        if model.dbow_ct_words:
-            train_batch_sg_ct(model, [doc_words],model.st_label[doctag_indexes[0]], alpha, work,False)
-        else:
-            train_batch_sg(model, [doc_words], alpha, work,False)
-    for doctag_index in doctag_indexes:
-        for word in doc_words:
-            train_sg_pair_CT(model, word, doctag_index, alpha,st_lab = model.st_label[doctag_index], learn_vectors=learn_doctags,
+        if train_words and learn_words:
+            if model.dbow_ct_words:
+                train_batch_sg_ct(model, [doc_words],model.st_label[doctag_indexes[0]], alpha, work,False)
+            else:
+                train_batch_sg(model, [doc_words], alpha, work,False)
+        for doctag_index in doctag_indexes:
+            for word in doc_words:
+                train_sg_pair_CT(model, word, doctag_index, alpha,st_lab = model.st_label[doctag_index], learn_vectors=learn_doctags,
                           learn_hidden=learn_hidden, context_vectors=doctag_vectors,
                           context_locks=doctag_locks)
 
-    return len(doc_words)
-def train_batch_sg_ct(model, sentences, st_lb, alpha, work=None, compute_loss = False):
-    result = 0
-    if st_lb ==1:
-        vocabs = model.wv.vocab_s
-    else:
-        vocabs = model.wv.vocab_t
+        return len(doc_words)
+    def train_batch_sg_ct(model, sentences, st_lb, alpha, work=None, compute_loss = False):
+        result = 0
+        if st_lb ==1:
+            vocabs = model.wv.vocab_s
+        else:
+            vocabs = model.wv.vocab_t
 
-    for sentence in sentences:
-        # subsampling for whole corpus
-        word_vocabs = [vocabs[w] for w in sentence if w in model.wv.vocab and 
+        for sentence in sentences:
+            # subsampling for whole corpus
+            word_vocabs = [vocabs[w] for w in sentence if w in model.wv.vocab and 
                         model.wv.vocab[w].sample_int > model.random.rand() * 2**32]
-        # negative sampling for specific corpus
-        for pos, word in enumerate(word_vocabs):
-            reduced_window = model.random.randint(model.window)
+            # negative sampling for specific corpus
+            for pos, word in enumerate(word_vocabs):
+                reduced_window = model.random.randint(model.window)
 
-            start = max(0,pos-model.window+reduced_window)
-            for pos2, word2 in enumerate(word_vocabs[start:(pos+model.window +1 - reduced_window)],start):
-                # do not train on the word itself
-                if pos2 != pos:
-                    train_sg_pair_CT(model,model.wv.index2word[word.index],word2.index,alpha,compute_loss = compute_loss )
-        result += len(word_vocabs)
-    return result
+                start = max(0,pos-model.window+reduced_window)
+                for pos2, word2 in enumerate(word_vocabs[start:(pos+model.window +1 - reduced_window)],start):
+                    # do not train on the word itself
+                    if pos2 != pos:
+                        train_sg_pair_CT(model,model.wv.index2word[word.index],word2.index,alpha,compute_loss = compute_loss )
+            result += len(word_vocabs)
+        return result
 
-def train_sg_pair_CT(model, word, context_index, alpha,st_lab = None, learn_vectors = True, learn_hidden=True,
-        context_vectors = None, context_locks=None, compute_loss =False):
-    if context_vectors is None:
-        context_vectors = model.wv.syn0
-    if context_locks is None:
-        context_locks = model.syn0_lockf
-    if word not in model.wv.vocab:
-        return
-    st_label = st_lab
-    if st_label ==1:
-        predict_word = model.wv.vocab_s[word]
-        cum_table = model.cum_table_s
-    else:
-        predict_word = model.wv.vocab_t[word]
-        cum_table = model.cum_table_t
+    def train_sg_pair_CT(model, word, context_index, alpha,st_lab = None, learn_vectors = True, learn_hidden=True,
+            context_vectors = None, context_locks=None, compute_loss =False):
+        if context_vectors is None:
+            context_vectors = model.wv.syn0
+        if context_locks is None:
+            context_locks = model.syn0_lockf
+        if word not in model.wv.vocab:
+            return
+        st_label = st_lab
+        if st_label ==1:
+            predict_word = model.wv.vocab_s[word]
+            cum_table = model.cum_table_s
+        else:
+            predict_word = model.wv.vocab_t[word]
+            cum_table = model.cum_table_t
     
-    l1 = context_vectors[context_index]
-    lock_factor = context_locks[context_index]
+        l1 = context_vectors[context_index]
+        lock_factor = context_locks[context_index]
 
-    neu1e = zeros(l1.shape)
+        neu1e = zeros(l1.shape)
 
-    word_indices = [predict_word.index]
-    while len(word_indices) < model.negative +1:
-       w = cum_table.searchsorted(model.random.randint(cum_table[-1]))
-       if w != predict_word.index:
-           word_indices.append(w)
-    l2b = model.syn1neg[word_indices]
-    prod_term = dot(l1,l2b.T)
-    fb = expit(prod_term)
-    gb = (model.neg_labels - fb)*alpha
-    if learn_hidden:
-        model.syn1neg[word_indices] += outer(gb,l1)
-    neu1e += dot(gb,l2b)
+        word_indices = [predict_word.index]
+        while len(word_indices) < model.negative +1:
+            w = cum_table.searchsorted(model.random.randint(cum_table[-1]))
+            if w != predict_word.index:
+                word_indices.append(w)
+        l2b = model.syn1neg[word_indices]
+        prod_term = dot(l1,l2b.T)
+        fb = expit(prod_term)
+        gb = (model.neg_labels - fb)*alpha
+        if learn_hidden:
+            model.syn1neg[word_indices] += outer(gb,l1)
+        neu1e += dot(gb,l2b)
 
-    if compute_loss:
-        model.running_training_loss -= sum(log(expit(-1*prod_term[1:])))
-        model.running_training_loss -= log(expit(prodterm[0]))
-    if learn_vectors:
-        l1 += neu1e * lock_factor
+        if compute_loss:
+            model.running_training_loss -= sum(log(expit(-1*prod_term[1:])))
+            model.running_training_loss -= log(expit(prodterm[0]))
+        if learn_vectors:
+            l1 += neu1e * lock_factor
 
-    return neu1e
+        return neu1e
 
 
 
