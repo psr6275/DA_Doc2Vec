@@ -99,17 +99,6 @@ doctag = deepcopy(model_ct.docvecs.doctag_syn0)
 #doctag = np.delete(doctag,[posi,negi],0)
 doc2vec = {'st_label':total_st_label,'true_label':total_true_label,'docvec':doctag}
 
-srcX = doctag[src_idx]
-tgtY = doctag[tgt_idx]
-srcY = total_true_label[src_idx]
-tgtY = total_true_label[tgt_idx]
-
-clf = svm.SVC(C = 10,gamma =0.01)
-clf2 = svm.SVC(kernel = 'lienar')
-clf.fit(srcX,srcY)
-print("rbf",src,tgt,clf.score(tgtX,tgtY))
-clf.fit(tgtX,tgtY)
-
 embed()
 #f = open(file_name+'_dbow_ct_fast_no_words_data.pickle','wb')
 #pickle.dump(doc2vec,f)

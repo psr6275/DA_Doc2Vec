@@ -1,6 +1,5 @@
-#from gensim.models.doc2vec import *
-#from gensim.models.word2vec import Word2Vec
-from DA_doc2vec.doc2vec_CT import *
+from DA_doc2vec.doc2vec import *
+from DA_doc2vec.word2vec import Word2Vec
 import pickle
 import re
 import numpy as np
@@ -11,7 +10,6 @@ from IPython import embed
 from sklearn import svm
 from sklearn.preprocessing import StandardScaler
 scaler = StandardScaler()
-
 data_path = '../data/'
 stops = set(nc.stopwords.words("english"))
 
@@ -50,8 +48,8 @@ f = open(data_path+'amazon_source_'+src+'_target_'+tgt+'_shuffled.pickle','rb')
 aa = pickle.load(f)
 f.close()
 total_text = aa['total_text']
-total_st_label = aa['st_label']
 total_true_label = aa['true_label']
+total_st_label = aa['st_label']
 
 documents = []
 for document in total_text:
@@ -65,53 +63,55 @@ for doc in documents:
         sentence = sen.split()
         sentences2.append(sentence)
 sentences = []
+window = 5
+#null_pad = ["NULL"]*(window-1)
+#null_pad = ' '.join(wrd for wrd in null_pad)
 for uid, doc in enumerate(documents):
     for sen in doc:
         sen = sen.lower()
         sen = re.sub("[^a-zA-Z]"," ",sen)
-        if total_st_label[uid] ==1:
-            #if total_true_label[uid] ==1:
-            #    sentence = TaggedDocument(words = sen.split(),tags = ['DOC_%s'%(uid),'Positive'])
-            #else:
-            #    sentence = TaggedDocument(words = sen.split(),tags = ['DOC_%s'%(uid),'Negative'])
-            sentence = TaggedLabeledDocument(words = sen.split(), tags = ['DOC_%s'%(uid)], labels = 1)
-        else:
-            sentence = TaggedLabeledDocument(words = sen.split(), tags = ['DOC_%s'%(uid)], labels = 0)
+        #if len(sen) <window:
+        #    sen = null_pad +" "+ sen
+        #if total_st_label[uid] ==1:
+        #    if total_true_label[uid] ==1:
+        #        sentence = TaggedDocument(words = sen.split(),tags = ['DOC_%s'%(uid),'Positive'])
+        #    else:
+        #        sentence = TaggedDocument(words = sen.split(),tags = ['DOC_%s'%(uid),'Negative'])
+        #else:
+        sentence = TaggedDocument(words = sen.split(), tags = ['DOC_%s'%(uid)])
         sentences.append(sentence)
 
 print("length of sentences = ",len(sentences))
 print(sentences[0])
 
 del documents
-
 src_idx = total_st_label==1
 tgt_idx = total_st_label==0
-print("source",src,"target",tgt)
 d_size = 200
-print("start to training CT-doc2vec with word training")
+
+print("start to train the word vectors using word2vec")
+
+model_word2vec = Word2Vec(sentences2,size = d_size, window=3, min_count=10, workers = 30, sg=1, iter=30)
+#model_word2vec.save(data_path+'word2vec_source_'+src+'_target_'+tgt+'.sg')
+print("start to train document vectors using fixed word vectors")
+
 from copy import deepcopy
-model_ct = Doc2Vec(sentences,st_label = total_st_label,dbow_ct = 1,dbow_ct_words = 0,negative=5,size = d_size,dbow_words =1, window = 3, min_count = 10, workers = 30, dm=0,iter=30)
+model_dbow = Doc2Vec(size = d_size,learn_hidden=False,dbow_words =0, window = 5, min_count = 10, workers = 30, dm=0,iter=30)
+model_dbow.build_vocab(sentences)
+model_dbow.wv.syn0 = model_word2vec.wv.syn0
+model_dbow.syn1neg = model_word2vec.syn1neg
+model_dbow.train(sentences,total_examples = model_dbow.corpus_count,epochs = model_dbow.iter )
+
 file_name = data_path+'doc2vec_source_'+src+'_target_'+tgt
-#model_ct.save(file_name+'.ct_fast_no_words')
+#model_dbow.save(file_name+'.dbow')
 #posi = model_dbow.docvecs._int_index('Positive')
 #negi = model_dbow.docvecs._int_index('Negative')
-doctag = deepcopy(model_ct.docvecs.doctag_syn0)
+doctag = deepcopy(model_dbow.docvecs.doctag_syn0)
 #doctag = np.delete(doctag,[posi,negi],0)
 doc2vec = {'st_label':total_st_label,'true_label':total_true_label,'docvec':doctag}
 
-srcX = doctag[src_idx]
-tgtY = doctag[tgt_idx]
-srcY = total_true_label[src_idx]
-tgtY = total_true_label[tgt_idx]
-
-clf = svm.SVC(C = 10,gamma =0.01)
-clf2 = svm.SVC(kernel = 'lienar')
-clf.fit(srcX,srcY)
-print("rbf",src,tgt,clf.score(tgtX,tgtY))
-clf.fit(tgtX,tgtY)
-
 embed()
-#f = open(file_name+'_dbow_ct_fast_no_words_data.pickle','wb')
+#f = open(file_name+'_dbow_data.pickle','wb')
 #pickle.dump(doc2vec,f)
 #f.close()
 
