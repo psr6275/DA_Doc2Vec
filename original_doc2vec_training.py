@@ -7,6 +7,9 @@ import pandas as pd
 import nltk.corpus as nc
 import random
 from IPython import embed
+from sklearn import svm
+from sklearn.preprocessing import StandardScaler
+
 data_path = '../data/'
 stops = set(nc.stopwords.words("english"))
 

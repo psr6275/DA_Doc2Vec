@@ -1,5 +1,5 @@
 #from gensim.models.doc2vec import *
-#from gensim.models.word2vec import Word2Vec
+from gensim.models.word2vec import Word2Vec
 from DA_doc2vec.doc2vec_CT import *
 import pickle
 import re
@@ -88,6 +88,7 @@ src_idx = total_st_label==1
 tgt_idx = total_st_label==0
 print("source",src,"target",tgt)
 d_size = 200
+model_word = Word2Vec(sentences2, size = d_size,window=3, min_count = 10, workers = 30, iter
 print("start to training CT-doc2vec with word training")
 from copy import deepcopy
 model_ct = Doc2Vec(sentences,st_label = total_st_label,dbow_ct = 1,dbow_ct_words = 0,negative=5,size = d_size,dbow_words =1, window = 3, min_count = 10, workers = 30, dm=0,iter=30)
