@@ -50,9 +50,9 @@ f.close()
 total_text = aa['total_text']
 total_true_label = aa['true_label']
 total_st_label = aa['st_label']
-
 src_idx = total_st_label==1
 tgt_idx = total_st_label==0
+total_text =list(np.array(total_text)[tgt_idx])
 
 documents = []
 for document in total_text:
@@ -94,19 +94,18 @@ d_size = 200
 print("start to train the word vectors using word2vec")
 
 model_word2vec = Word2Vec(sentences2,size = d_size, window=3, min_count=10, workers = 30, sg=1, iter=30)
-model_word2vec.save(data_path+'word2vec_source_'+src+'_target_'+tgt+'.sg')
+#model_word2vec.save(data_path+'word2vec_source_'+src+'_target_'+tgt+'.sg')
 print("start to train document vectors using fixed word vectors")
 
 from copy import deepcopy
 model_dbow = Doc2Vec(sentences,size = d_size,dbow_words =1, window = 3,negative=5 ,min_count = 10, workers = 30, dm=0,iter=30)
-file_name = data_path+'doc2vec_source_'+src+'_target_'+tgt
+#file_name = data_path+'doc2vec_source_'+src+'_target_'+tgt
 #model_dbow.save(file_name+'.dbow')
 #posi = model_dbow.docvecs._int_index('Positive')
 #negi = model_dbow.docvecs._int_index('Negative')
-doctag = deepcopy(model_dbow.docvecs.doctag_syn0)
+#doctag = deepcopy(model_dbow.docvecs.doctag_syn0)
 #doctag = np.delete(doctag,[posi,negi],0)
-idx2wrd = model_dbow.wv.index2word
-doc2vec = {'st_label':total_st_label,'true_label':total_true_label,'docvec':doctag}
+#doc2vec = {'st_label':total_st_label,'true_label':total_true_label,'docvec':doctag}
 
 embed()
 #f = open(file_name+'_dbow_data.pickle','wb')
