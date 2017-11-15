@@ -15,8 +15,8 @@ scaler = StandardScaler()
 data_path = '../data/'
 stops = set(nc.stopwords.words("english"))
 
-src = "dvd"
-tgt = "electronics"
+src = "books"
+tgt = "dvd"
 """
 f = open(data_path + 'amazon_domain_adaptation_dictionary_data.pickle','rb')
 Dics = pickle.load(f)
@@ -90,9 +90,9 @@ print("source",src,"target",tgt)
 d_size = 200
 print("start to training CT-doc2vec with word training")
 from copy import deepcopy
-model_ct = Doc2Vec(sentences,st_label = total_st_label,dbow_ct = 1,dbow_ct_words = 0,negative=5,size = d_size,dbow_words =1, window = 3, min_count = 10, workers = 30, dm=0,iter=30)
+model_ct = Doc2Vec(sentences,st_label = total_st_label,dbow_ct = 1,dbow_ct_words = 1,negative=5,size = d_size,dbow_words =1, window = 3, min_count = 10, workers = 30, dm=0,iter=30)
 file_name = data_path+'doc2vec_source_'+src+'_target_'+tgt
-#model_ct.save(file_name+'.ct_no_words')
+model_ct.save(file_name+'.ct_words')
 #posi = model_dbow.docvecs._int_index('Positive')
 #negi = model_dbow.docvecs._int_index('Negative')
 doctag = deepcopy(model_ct.docvecs.doctag_syn0)
@@ -110,7 +110,7 @@ clf.fit(srcX,srcY)
 print("rbf",src,tgt,clf.score(tgtX,tgtY))
 clf.fit(tgtX,tgtY)
 
-embed()
+#embed()
 #f = open(file_name+'_dbow_ct_fast_no_words_data.pickle','wb')
 #pickle.dump(doc2vec,f)
 #f.close()
